@@ -1040,18 +1040,26 @@ class Trainer(object):
                     images = wandb.Image(
                         val_img_grid,
                         caption=f"- Left: GT, Right: Output")
+
+                    wandb.log({f"eval/examples": images})
                     
-                    val_img = [(gt_feature[0].cpu().numpy() * 255).astype(np.uint8), (pred_clip[0].cpu().numpy() * 255).astype(np.uint8)]
-                    val_img_grid = make_grid(val_img)
-                    images_clip = wandb.Image(
-                        val_img_grid,
-                        caption=f"- Left: GT, Right: Output")
+                    gt_feature_vis = (gt_feature[0].cpu().numpy() * 255).astype(np.uint8)
+                    pred_clip_vis  = (pred_clip[0].cpu().numpy() * 255).astype(np.uint8)
+
+                    gt_feature_vis = wandb.Image(gt_feature_vis)
+                    pred_clip_vis = wandb.Image(pred_clip_vis)
+                    
+                    # val_img = [torch.tensor(gt_feature_vis), torch.tensor(pred_clip_vis)]
+                    # val_img_grid = make_grid(val_img)
+                    # images_clip = wandb.Image(
+                    #     val_img_grid,
+                    #     caption=f"- Left: GT, Right: Output")
 
                     wandb.log(
-                            {f"eval/loss_val": loss_val,
-                            f"eval/examples": images,
-                            f"eval/clip_visualization": images_clip,
-                            f"eval/val_step": self.local_step,
+                            {"eval/loss_val": loss_val,
+                            "eval/clip_gt": gt_feature_vis,
+                            "eval/clip_predict": pred_clip_vis
+                            # "eval/val_step": self.local_step,
                             })
 
         average_loss = total_loss / self.local_step
