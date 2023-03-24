@@ -1048,12 +1048,12 @@ class Trainer(object):
 
                     gt_feature_vis = wandb.Image(gt_feature_vis)
                     pred_clip_vis = wandb.Image(pred_clip_vis)
-                    
-                    # val_img = [torch.tensor(gt_feature_vis), torch.tensor(pred_clip_vis)]
-                    # val_img_grid = make_grid(val_img)
-                    # images_clip = wandb.Image(
-                    #     val_img_grid,
-                    #     caption=f"- Left: GT, Right: Output")
+                        
+                        # val_img = [torch.tensor(gt_feature_vis), torch.tensor(pred_clip_vis)]
+                        # val_img_grid = make_grid(val_img)
+                        # images_clip = wandb.Image(
+                        #     val_img_grid,
+                        #     caption=f"- Left: GT, Right: Output")
 
                     wandb.log(
                             {"eval/loss_val": loss_val,
