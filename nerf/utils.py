@@ -8,7 +8,6 @@ import warnings
 import tensorboardX
 
 import numpy as np
-import pandas as pd
 
 import time
 from datetime import datetime
@@ -31,6 +30,9 @@ from torch_ema import ExponentialMovingAverage
 from packaging import version as pver
 import lpips
 from torchmetrics.functional import structural_similarity_index_measure
+
+import wandb
+from torchvision.utils import make_grid
 
 def custom_meshgrid(*args):
     # ref: https://pytorch.org/docs/stable/generated/torch.meshgrid.html?highlight=meshgrid#torch.meshgrid
@@ -893,6 +895,11 @@ class Trainer(object):
 
         average_loss = total_loss / self.local_step
         self.stats["loss"].append(average_loss)
+        wandb.log({
+            "train/average_loss": average_loss,
+            "train/learning_rate": self.lr_scheduler.get_lr()[0],
+            "train/epoch": self.epoch
+        })
 
         if self.local_rank == 0:
             pbar.close()
@@ -939,7 +946,7 @@ class Trainer(object):
                 self.local_step += 1
 
                 with torch.cuda.amp.autocast(enabled=self.fp16):
-                    preds, preds_depth, truths, loss = self.eval_step(data)
+                    preds, preds_depth, truths, loss, pred_clip, gt_feature = self.eval_step(data)
 
                 # all_gather/reduce the statistics (NCCL only support all_*)
                 if self.world_size > 1:
@@ -957,7 +964,15 @@ class Trainer(object):
                     truths_list = [torch.zeros_like(truths).to(self.device) for _ in range(self.world_size)] # [[B, ...], [B, ...], ...]
                     dist.all_gather(truths_list, truths)
                     truths = torch.cat(truths_list, dim=0)
-                
+
+                    pred_clip_list = [torch.zeros_like(pred_clip).to(self.device) for _ in range(self.world_size)] # [[B, ...], [B, ...], ...]
+                    dist.all_gather(pred_clip_list, pred_clip)
+                    pred_clip = torch.cat(pred_clip_list, dim=0)
+
+                    gt_feature_list = [torch.zeros_like(gt_feature).to(self.device) for _ in range(self.world_size)] # [[B, ...], [B, ...], ...]
+                    dist.all_gather(gt_feature_list, gt_feature)
+                    gt_feature = torch.cat(gt_feature_list, dim=0)
+
                 loss_val = loss.item()
                 total_loss += loss_val
 
@@ -983,13 +998,31 @@ class Trainer(object):
                     pred_depth = preds_depth[0].detach().cpu().numpy()
                     pred_depth = (pred_depth * 255).astype(np.uint8)
                     
-                    cv2.imwrite(save_path, cv2.cvtColor(pred, cv2.COLOR_RGB2BGR))
-                    cv2.imwrite(save_path_depth, pred_depth)
+                    # cv2.imwrite(save_path, cv2.cvtColor(pred, cv2.COLOR_RGB2BGR))
+                    # cv2.imwrite(save_path_depth, pred_depth)
 
                     pbar.set_description(f"loss={loss_val:.4f} ({total_loss/self.local_step:.4f})")
                     pbar.update(loader.batch_size)
 
+                    val_img = [truths[0].permute(2, 0, 1), preds[0].permute(2, 0, 1)]
+                    val_img_grid = make_grid(val_img)
+                    images = wandb.Image(
+                        val_img_grid,
+                        caption=f"- Left: GT, Right: Output")
+                    
+                    val_img = [gt_feature[0].permute(2, 0, 1), pred_clip[0].permute(2, 0, 1)]
+                    val_img_grid = make_grid(val_img)
+                    images_clip = wandb.Image(
+                        val_img_grid,
+                        caption=f"- Left: GT, Right: Output")
 
+                    wandb.log(
+                            {f"eval/loss_val": loss_val,
+                            f"eval/examples": images,
+                            f"eval/clip_visualization": images_clip,
+                            f"eval/val_step": self.local_step,
+                            })
+                    
         average_loss = total_loss / self.local_step
         self.stats["valid_loss"].append(average_loss)
 
