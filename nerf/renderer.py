@@ -326,7 +326,7 @@ class NeRFRenderer(nn.Module):
             # 'semantic_features': semantic_features,
             'coordinates_map': coordinates_map,
             # Additional outputs needed for cluserting
-            'weights': weights.squeeze(-1),
+            # 'weights': weights.squeeze(-1),
             'rgb': rgbs,
             'clip_features': clip_features
         }
@@ -745,12 +745,11 @@ class NeRFRenderer(nn.Module):
                     #     b:b + 1, head:tail, :] = results_['semantic_features']
                     clip_features[
                         b:b + 1, head:tail, :] = results_['clip_features']
-                    coordinates_map[b:b + 1,
-                                    head:tail, :] = results_['coordinates_map']
+                    # coordinates_map[b:b + 1,
+                    #                 head:tail, :] = results_['coordinates_map']
 
-                    weights[b:b + 1, head:tail, head:tail] = results_['weights']
-
-                    rgbs[b:b + 1, head:tail, :] = results_['rgb']
+                    # weights[b:b + 1, head:tail, head:tail] = results_['weights']
+                    # rgbs[b:b + 1, head:tail, :] = results_['rgb']
 
                     head += max_ray_batch
 
@@ -761,9 +760,9 @@ class NeRFRenderer(nn.Module):
             # results['semantic'] = semantic
             # results['semantic_features'] = semantic_features
             results['clip_features'] = clip_features
-            results['coordinates_map'] = coordinates_map
-            results['weights'] = weights
-            results['rgb'] = rgbs
+            # results['coordinates_map'] = coordinates_map
+            # results['weights'] = weights
+            # results['rgb'] = rgbs
 
         else:
             results = _run(rays_o, rays_d, direction_norms, **kwargs)

@@ -275,7 +275,7 @@ class Trainer(object):
             use_loss_as_metric=True,  # use loss as the first metric
             report_metric_at_train=False,  # also report metrics at training
             use_checkpoint="latest",  # which ckpt to use at init time
-            use_tensorboardX=True,  # whether to use tensorboard for logging
+            use_tensorboardX=False,  # whether to use tensorboard for logging
             scheduler_update_every_step=False,  # whether to call scheduler.step() after every train step
     ):
 
@@ -979,6 +979,14 @@ class Trainer(object):
                     dist.all_gather(truths_list, truths)
                     truths = torch.cat(truths_list, dim=0)
 
+                    pred_clip_list = [torch.zeros_like(pred_clip).to(self.device) for _ in range(self.world_size)] # [[B, ...], [B, ...], ...]
+                    dist.all_gather(pred_clip_list, pred_clip)
+                    pred_clip = torch.cat(pred_clip_list, dim=0)
+
+                    gt_feature_list = [torch.zeros_like(gt_feature).to(self.device) for _ in range(self.world_size)] # [[B, ...], [B, ...], ...]
+                    dist.all_gather(gt_feature_list, gt_feature)
+                    gt_feature = torch.cat(gt_feature_list, dim=0)
+
                 loss_val = loss.item()
                 total_loss += loss_val
 
@@ -989,21 +997,21 @@ class Trainer(object):
                         metric.update(preds, truths)
 
                     # save image
-                    save_path = os.path.join(
-                        self.workspace, 'validation',
-                        f'rgb_{self.name}_{self.local_step:04d}.png')
-                    save_path_depth = os.path.join(
-                        self.workspace, 'validation',
-                        f'depth_{self.name}_{self.local_step:04d}.png')
-                    save_path_semantic = os.path.join(
-                        self.workspace, 'validation',
-                        f"sem_{self.name}_{self.local_step:04d}.png")
+                    # save_path = os.path.join(
+                    #     self.workspace, 'validation',
+                    #     f'rgb_{self.name}_{self.local_step:04d}.png')
+                    # save_path_depth = os.path.join(
+                    #     self.workspace, 'validation',
+                    #     f'depth_{self.name}_{self.local_step:04d}.png')
+                    # save_path_semantic = os.path.join(
+                    #     self.workspace, 'validation',
+                    #     f"sem_{self.name}_{self.local_step:04d}.png")
 
                     normalized_depth = 1.0 - torch.clip(preds_depth, 0.0,
                                                         10.0) / 10.0
 
                     #self.log(f"==> Saving validation image to {save_path}")
-                    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                    # os.makedirs(os.path.dirname(save_path), exist_ok=True)
                     if self.opt.color_space == 'linear':
                         preds = linear_to_srgb(preds)
                     # cv2.imwrite(
@@ -1033,7 +1041,7 @@ class Trainer(object):
                         val_img_grid,
                         caption=f"- Left: GT, Right: Output")
                     
-                    val_img = [gt_feature[0].permute(2, 0, 1), pred_clip[0].permute(2, 0, 1)]
+                    val_img = [(gt_feature[0].cpu().numpy() * 255).astype(np.uint8), (pred_clip[0].cpu().numpy() * 255).astype(np.uint8)]
                     val_img_grid = make_grid(val_img)
                     images_clip = wandb.Image(
                         val_img_grid,
