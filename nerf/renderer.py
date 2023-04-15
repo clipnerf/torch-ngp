@@ -760,7 +760,7 @@ class NeRFRenderer(nn.Module):
             # results['semantic'] = semantic
             # results['semantic_features'] = semantic_features
             results['clip_features'] = clip_features
-            # results['coordinates_map'] = coordinates_map
+            results['coordinates_map'] = coordinates_map
             # results['weights'] = weights
             # results['rgb'] = rgbs
 
