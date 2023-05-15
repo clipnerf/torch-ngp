@@ -298,14 +298,16 @@ class NeRFRenderer(nn.Module):
 
         image = image + (1 - weights_sum).unsqueeze(-1) * bg_color
 
-        image = image.view(*prefix, 3)
-        depth = depth.view(*prefix)
-
         clip_features = self.clip(geometric_features.view(-1, geometric_features.shape[-1]), sigma)
         clip_features = clip_features.view(
                     (geometric_features.shape[0], geometric_features.shape[1],
                     clip_features.shape[-1]))
-        clip_features = (weights * clip_features).sum(dim=-2)
+        clip_features = (weights.detach() * clip_features).sum(dim=-2)
+
+        image = image.view(*prefix, 3)
+        depth = depth.view(*prefix)
+        coordinates_map = coordinates_map.view(*prefix, 3)
+        clip_features = clip_features.view(*prefix, -1)
         
         # semantic, semantic_features = self.semantic(
         #     geometric_features.view(-1, geometric_features.shape[-1]), sigma)
@@ -725,8 +727,8 @@ class NeRFRenderer(nn.Module):
             coordinates_map = torch.empty((B, N, 3), device=device)
 
             # additional feature from run
-            rgbs = torch.empty((B, N, N, 3), device=device)
-            weights = torch.empty((B, N, N), device=device)
+            # rgbs = torch.empty((B, N, N, 3), device=device)
+            # weights = torch.empty((B, N, N), device=device)
 
             for b in range(B):
                 head = 0
@@ -745,8 +747,8 @@ class NeRFRenderer(nn.Module):
                     #     b:b + 1, head:tail, :] = results_['semantic_features']
                     clip_features[
                         b:b + 1, head:tail, :] = results_['clip_features']
-                    # coordinates_map[b:b + 1,
-                    #                 head:tail, :] = results_['coordinates_map']
+                    coordinates_map[b:b + 1,
+                                    head:tail, :] = results_['coordinates_map']
 
                     # weights[b:b + 1, head:tail, head:tail] = results_['weights']
                     # rgbs[b:b + 1, head:tail, :] = results_['rgb']

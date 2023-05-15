@@ -276,7 +276,8 @@ class Trainer(object):
             report_metric_at_train=False,  # also report metrics at training
             use_checkpoint="latest",  # which ckpt to use at init time
             use_tensorboardX=False,  # whether to use tensorboard for logging
-            scheduler_update_every_step=False,  # whether to call scheduler.step() after every train step
+            scheduler_update_every_step=False,  # whether to call scheduler.step() after every train step,
+            steps=1000
     ):
 
         self.name = name
@@ -297,6 +298,7 @@ class Trainer(object):
         self.use_tensorboardX = use_tensorboardX
         self.time_stamp = time.strftime("%Y-%m-%d_%H-%M-%S")
         self.scheduler_update_every_step = scheduler_update_every_step
+        self.steps = steps
         self.device = device if device is not None else torch.device(
             f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu')
         self.console = Console()
@@ -823,7 +825,7 @@ class Trainer(object):
 
         return outputs
 
-    def train_one_epoch(self, loader):
+    def train_one_epoch(self, iterator):
         self.log(
             f"==> Start Training Epoch {self.epoch}, lr={self.optimizer.param_groups[0]['lr']:.6f} ..."
         )
@@ -837,23 +839,28 @@ class Trainer(object):
 
         # distributedSampler: must call set_epoch() to shuffle indices across multiple epochs
         # ref: https://pytorch.org/docs/stable/data.html
-        if self.world_size > 1:
-            loader.sampler.set_epoch(self.epoch)
+        # if self.world_size > 1:
+        #     loader.sampler.set_epoch(self.epoch)
 
+        # if self.local_rank == 0:
+        #     pbar = tqdm.tqdm(
+        #         total=len(loader),
+        #         bar_format=
+        #         '{desc}: {percentage:3.0f}% {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]'
+        #     )
         if self.local_rank == 0:
-            pbar = tqdm.tqdm(
-                total=len(loader),
-                bar_format=
-                '{desc}: {percentage:3.0f}% {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]'
-            )
+            step_bar = tqdm.tqdm(range(self.steps), unit="batch")
 
         self.local_step = 0
 
-        for data in loader:
-            # update grid every 16 steps
-            if self.model.cuda_ray and self.global_step % 16 == 0:
-                with torch.cuda.amp.autocast(enabled=self.fp16):
-                    self.model.update_extra_state()
+        for _ in step_bar:
+            step_bar.set_description(f"Epoch {self.epoch}")
+            data = next(iterator)
+        # for data in loader:
+        #     # update grid every 16 steps
+        #     if self.model.cuda_ray and self.global_step % 16 == 0:
+        #         with torch.cuda.amp.autocast(enabled=self.fp16):
+        #             self.model.update_extra_state()
 
             self.local_step += 1
             self.global_step += 1
@@ -878,22 +885,22 @@ class Trainer(object):
                     for metric in self.metrics:
                         metric.update(preds, truths)
 
-                if self.use_tensorboardX:
-                    self.writer.add_scalar("train/loss", loss_val,
-                                           self.global_step)
-                    self.writer.add_scalar("train/lr",
-                                           self.optimizer.param_groups[0]['lr'],
-                                           self.global_step)
+                # if self.use_tensorboardX:
+                #     self.writer.add_scalar("train/loss", loss_val,
+                #                            self.global_step)
+                #     self.writer.add_scalar("train/lr",
+                #                            self.optimizer.param_groups[0]['lr'],
+                #                            self.global_step)
 
                 if self.scheduler_update_every_step:
-                    pbar.set_description(
+                    step_bar.set_description(
                         f"loss={loss_val:.4f} ({total_loss/self.local_step:.4f}), lr={self.optimizer.param_groups[0]['lr']:.6f}"
                     )
                 else:
-                    pbar.set_description(
+                    step_bar.set_description(
                         f"loss={loss_val:.4f} ({total_loss/self.local_step:.4f})"
                     )
-                pbar.update(1)
+                step_bar.update(1)
 
         if self.ema is not None:
             self.ema.update()
@@ -907,7 +914,7 @@ class Trainer(object):
         })
 
         if self.local_rank == 0:
-            pbar.close()
+            step_bar.close()
             if self.report_metric_at_train:
                 for metric in self.metrics:
                     self.log(metric.report(), style="red")
@@ -943,7 +950,8 @@ class Trainer(object):
 
         if self.local_rank == 0:
             pbar = tqdm.tqdm(
-                total=len(loader),
+                total=loader._data.rotations.shape[0] //
+                                 10,
                 bar_format=
                 '{desc}: {percentage:3.0f}% {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]'
             )
@@ -960,7 +968,7 @@ class Trainer(object):
                 self.local_step += 1
 
                 with torch.cuda.amp.autocast(enabled=self.fp16):
-                    preds, preds_depth, truths, loss, pred_clip, gt_feature = self.eval_step(data)
+                    preds, preds_depth, truths, loss, pred_clip, gt_feature, coord_map = self.eval_step(data)
 
                 # all_gather/reduce the statistics (NCCL only support all_*)
                 if self.world_size > 1:
@@ -1043,11 +1051,16 @@ class Trainer(object):
 
                     wandb.log({f"eval/examples": images})
                     
-                    gt_feature_vis = (gt_feature[0].cpu().numpy() * 255).astype(np.uint8)
-                    pred_clip_vis  = (pred_clip[0].cpu().numpy() * 255).astype(np.uint8)
+                    # gt_feature_vis = (gt_feature[0] * 255).astype(np.uint8)
+                    # pred_clip_vis  = (pred_clip[0] * 255).astype(np.uint8)
+                    gt_feature_vis = gt_feature[0]
+                    pred_clip_vis = pred_clip[0]
 
                     gt_feature_vis = wandb.Image(gt_feature_vis)
                     pred_clip_vis = wandb.Image(pred_clip_vis)
+                    coord_map = coord_map[0].permute(2, 0, 1)
+                    coord_map_logger = wandb.Image(coord_map, caption="Coordinate Map")
+
                         
                         # val_img = [torch.tensor(gt_feature_vis), torch.tensor(pred_clip_vis)]
                         # val_img_grid = make_grid(val_img)
@@ -1058,8 +1071,9 @@ class Trainer(object):
                     wandb.log(
                             {"eval/loss_val": loss_val,
                             "eval/clip_gt": gt_feature_vis,
-                            "eval/clip_predict": pred_clip_vis
+                            "eval/clip_predict": pred_clip_vis,
                             # "eval/val_step": self.local_step,
+                            "eval/coordinate_map": coord_map_logger,
                             })
 
         average_loss = total_loss / self.local_step
